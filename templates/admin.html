@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>TrekGuard HQ | Master Command</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root { --neon: #00f2ff; --danger: #ff003c; --bg: #05070a; --panel: #0f1218; --success: #3fb950; --warning: #f2ff00; }
+        
+        body { 
+            margin: 0; background: var(--bg); color: white; font-family: 'Consolas', monospace;
+            display: grid; grid-template-columns: 360px 1fr 360px; height: 100vh; gap: 10px; padding: 10px; box-sizing: border-box;
+        }
+
+        /* --- 🚀 LOGO SPLASH PAGE --- */
+        #login-splash {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #05070a; z-index: 100000; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; transition: opacity 1s ease;
+        }
+        .splash-logo { width: 130px; filter: drop-shadow(0 0 20px var(--neon)); margin-bottom: 20px; }
+        .loading-bar { width: 200px; height: 2px; background: #1f252e; position: relative; margin-top: 20px; }
+        .loading-fill { position: absolute; height: 100%; background: var(--neon); width: 0%; animation: load 2s forwards; }
+        @keyframes load { to { width: 100%; } }
+
+        /* --- UI PANELS --- */
+        .panel { background: var(--panel); border: 1px solid #1f252e; border-radius: 4px; padding: 15px; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { color: var(--neon); font-size: 0.8rem; border-bottom: 1px solid #1f252e; margin-bottom: 10px; padding-bottom: 5px; letter-spacing: 2px; }
+
+        #map { flex: 1; border-radius: 4px; filter: grayscale(1) invert(1) contrast(1.2) brightness(0.9); }
+
+        /* --- 🚨 SOS ALARM --- */
+        #sos-banner {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 60px;
+            background: var(--danger); z-index: 9999; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: bold; letter-spacing: 5px; animation: alarm-flash 0.5s infinite;
+        }
+        @keyframes alarm-flash { 50% { background: #80001e; } }
+
+        /* --- 🛠️ TACTICAL POPUP (THE PART YOU WANTED) --- */
+        .leaflet-popup-content-wrapper { background: var(--panel) !important; color: white !important; border: 1px solid var(--neon); border-radius: 0; }
+        .leaflet-popup-tip { background: var(--neon) !important; }
+        .popup-data { font-size: 0.85rem; line-height: 1.8; padding: 5px; }
+        .popup-data b { color: var(--neon); letter-spacing: 1px; }
+
+        /* --- STAT GRID --- */
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .stat-box { background: rgba(0,0,0,0.4); padding: 10px; border: 1px solid #1f252e; border-radius: 4px; }
+        .stat-box .label { font-size: 0.6rem; color: #6a7687; text-transform: uppercase; }
+        .stat-box .val { font-size: 1.1rem; font-weight: bold; color: var(--neon); }
+
+        .big-data { font-size: 2.6rem; font-weight: bold; color: var(--neon); text-shadow: 0 0 10px rgba(0,242,255,0.3); }
+        .btn { background: var(--neon); color: black; border: none; padding: 12px; cursor: pointer; font-weight: bold; text-transform: uppercase; width: 100%; margin-top: 10px; transition: 0.3s;}
+        .btn:hover { filter: brightness(1.2); }
+        .btn-mute { background: white; color: black; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="login-splash">
+        <img src="https://cdn-icons-png.flaticon.com/512/854/854878.png" class="splash-logo">
+        <h1 style="letter-spacing: 10px;">TREKGUARD <span style="color:var(--neon)">HQ</span></h1>
+        <div class="loading-bar"><div class="loading-fill"></div></div>
+        <p style="font-size: 0.7rem; margin-top: 15px; color: #6a7687;">SATELLITE HANDSHAKE IN PROGRESS...</p>
+    </div>
+
+    <div id="sos-banner">🚨 EMERGENCY SOS DETECTED 🚨</div>
+    <audio id="siren" loop src="https://www.soundjay.com/buttons/beep-01a.mp3"></audio>
+
+    <div class="panel">
+        <div class="panel-header">CONSOLE ACCESS</div>
+        <button id="arm-btn" class="btn" style="background:#333; color:#777; margin-bottom:15px;" onclick="armSystem()">CLICK TO ARM AUDIO</button>
+        
+        <div class="panel-header">VITAL TELEMETRY</div>
+        <p style="margin:0;">TARGET: <span style="color:var(--neon)">TREKKER_01</span></p>
+        <p style="margin:15px 0 0 0;">DISTANCE</p>
+        <div id="dist-val" class="big-data">0.00 km</div>
+        
+        <p style="margin:15px 0 0 0;">ALTITUDE (M)</p>
+        <div id="alt-val" class="big-data">0</div>
+
+        <div class="data-grid">
+            <div class="stat-box"><div class="label">TEMP</div><div id="side-temp" class="val">0°C</div></div>
+            <div class="stat-box"><div class="label">AIR Q</div><div id="side-gas" class="val">--</div></div>
+            <div class="stat-box"><div class="label">PRESSURE</div><div id="side-pres" class="val">0</div></div>
+            <div class="stat-box"><div class="label">STATUS</div><div id="side-status" class="val" style="font-size:0.8rem">STABLE</div></div>
+        </div>
+
+        <div style="flex:1"></div>
+        <div class="panel-header">ELEVATION MATRIX</div>
+        <div style="height: 140px;"><canvas id="altChart"></canvas></div>
+    </div>
+
+    <div class="panel" style="padding:0; position: relative;">
+        <div id="map"></div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">REMOTE UPLINK</div>
+        <input type="text" id="msg" placeholder="TYPE BROADCAST..." style="background:#000; border:1px solid #1f252e; color:var(--neon); padding:12px; font-family: monospace; outline:none;">
+        <button class="btn" onclick="sendMsg()">EXECUTE</button>
+        <button id="mute-btn" class="btn btn-mute" onclick="stopSiren()">STOP SIREN</button>
+
+        <div class="panel-header" style="margin-top:20px;">MISSION LOGS</div>
+        <div id="logs" style="flex:1; overflow-y:auto; scrollbar-width: none; font-size:0.75rem; color:#6a7687;"></div>
+    </div>
+
+    <script>
+        const HQ_COORD = [12.9716, 77.5946];
+        let alertTotal = 0;
+        let isArmed = false;
+        const siren = document.getElementById('siren');
+
+        // SPLASH SCREEN
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('login-splash').style.opacity = '0';
+                setTimeout(() => { document.getElementById('login-splash').style.display = 'none'; }, 1000);
+            }, 2500);
+        });
+
+        // MAP SETUP
+        var map = L.map('map', {zoomControl: false}).setView(HQ_COORD, 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        // --- 🔵 THE DYNAMIC BLUE SOS LINE ---
+        var sosLine = L.polyline([], { color: '#00f2ff', weight: 3, dashArray: '10, 10', opacity: 0 }).addTo(map);
+
+        var tMarker = L.circleMarker(HQ_COORD, { radius: 10, color: '#00f2ff', fillOpacity: 0.8, weight: 3 }).addTo(map);
+        tMarker.bindPopup("Establishing Satellite Connection..."); // Placeholder
+
+        var hqMarker = L.marker(HQ_COORD).addTo(map).bindPopup("<b>HQ COMMAND</b>");
+
+        // CHART SETUP
+        const ctx = document.getElementById('altChart').getContext('2d');
+        const altChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ data: [], borderColor: '#00f2ff', fill: true, backgroundColor: 'rgba(0, 242, 255, 0.1)', tension: 0.4, pointRadius: 0 }] },
+            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#1f252e' }, ticks: { color: '#6a7687', font: {size: 9} } } } }
+        });
+
+        // --- MASTER SYNC ENGINE ---
+        async function sync() {
+            try {
+                const res = await fetch('/api/data');
+                const data = await res.json();
+                const s = data.sensors;
+
+                if (data.trekker_gps.lat !== 0) {
+                    const pos = [data.trekker_gps.lat, data.trekker_gps.lon];
+                    tMarker.setLatLng(pos);
+                    
+                    // --- Restoring the Full Tactical Popup ---
+                    tMarker.setPopupContent(`
+                        <div class="popup-data">
+                            <b style="font-size:1.1rem; color:var(--neon);">🛰️ TARGET_01</b><hr style="border:0.5px solid #333">
+                            🌡️ <b>TEMPERATURE:</b> ${s.temp}°C<br>
+                            ☁️ <b>PRESSURE:</b> ${Math.round(s.pres)} hPa<br>
+                            ⛰️ <b>ALTITUDE:</b> ${Math.round(s.alt)}m<br>
+                            ☢️ <b>GAS/AIR Q:</b> ${s.gas} PPM
+                        </div>
+                    `);
+
+                    // Update Sidebar Stats
+                    document.getElementById('side-temp').innerText = s.temp + "°C";
+                    document.getElementById('side-gas').innerText = s.gas + " PPM";
+                    document.getElementById('side-pres').innerText = Math.round(s.pres);
+                    document.getElementById('alt-val').innerText = Math.round(s.alt) + "m";
+
+                    const meters = map.distance(HQ_COORD, pos);
+                    document.getElementById('dist-val').innerText = (meters / 1000).toFixed(2) + " km";
+                    
+                    // --- SOS TRIGGER LOGIC ---
+                    if (data.alerts.length > alertTotal) {
+                        alertTotal = data.alerts.length;
+                        
+                        // 1. Show the Blue Line
+                        sosLine.setLatLngs([HQ_COORD, pos]);
+                        sosLine.setStyle({ opacity: 0.8 }); 
+                        
+                        // 2. Play Sound
+                        if(isArmed) { siren.play(); }
+
+                        // 3. UI Changes
+                        document.getElementById('sos-banner').style.display = 'flex';
+                        document.getElementById('mute-btn').style.display = 'block';
+                        document.getElementById('side-status').innerText = "SOS ACTIVE";
+                        document.getElementById('side-status').style.color = "var(--danger)";
+                        
+                        map.flyTo(pos, 18);
+                        addLog("🚨 SOS SIGNAL RECEIVED FROM TARGET_01");
+                    }
+                }
+
+                if (data.history) {
+                    altChart.data.labels = data.history.map(h => h.t);
+                    altChart.data.datasets[0].data = data.history.map(h => h.alt);
+                    altChart.update('none');
+                }
+            } catch(e) { console.error("Sync Error"); }
+        }
+
+        // --- CONTROLS ---
+        function armSystem() {
+            isArmed = true;
+            document.getElementById('arm-btn').style.background = "var(--success)";
+            document.getElementById('arm-btn').innerText = "AUDIO ARMED";
+            siren.play().then(() => { siren.pause(); });
+            addLog("UPLINK SECURED: READY FOR ALERTS");
+        }
+
+        function stopSiren() { 
+            siren.pause(); 
+            siren.currentTime = 0;
+            sosLine.setStyle({ opacity: 0 }); // Hide blue line again
+            
+            document.getElementById('mute-btn').style.display = 'none';
+            document.getElementById('sos-banner').style.display = 'none';
+            document.getElementById('side-status').innerText = "STABLE";
+            document.getElementById('side-status').style.color = "var(--success)";
+            addLog("ALARM RESET - LINE DISCONNECTED");
+        }
+
+        function addLog(m) {
+            const l = document.getElementById('logs');
+            l.innerHTML = `<div>[${new Date().toLocaleTimeString()}] ${m}</div>` + l.innerHTML;
+        }
+
+        async function sendMsg() {
+            const m = document.getElementById('msg').value;
+            if(!m) return;
+            await fetch('/api/send_command', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg:m, buzz:false})});
+            addLog("UPLINK: " + m);
+            document.getElementById('msg').value = "";
+        }
+
+        setInterval(sync, 3000);
+    </script>
+</body>
+</html>

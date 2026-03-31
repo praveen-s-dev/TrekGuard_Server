@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrekGuard | Universal HUD</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        * { box-sizing: border-box; }
+        :root {
+            --sky-color: #2d5a27; 
+            --accent: #58a6ff;
+            --danger: #f85149;
+            --success: #3fb950;
+            --glass: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            margin: 0; font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(to top, #000, var(--sky-color));
+            background-attachment: fixed; color: white;
+            transition: 2s ease; min-height: 100vh;
+            display: flex; flex-direction: column; overflow-x: hidden;
+        }
+
+        /* --- 🚨 SOS BLINK ANIMATION --- */
+        @keyframes sos-flash {
+            0% { background: linear-gradient(to top, #000, var(--sky-color)); }
+            50% { background: var(--danger); }
+            100% { background: linear-gradient(to top, #000, var(--sky-color)); }
+        }
+        .sos-active-blink {
+            animation: sos-flash 0.5s step-end infinite;
+        }
+
+        /* --- 🖥️ RESPONSIVE GRID SYSTEM --- */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px; padding: 10px;
+            max-width: 1400px; margin: 0 auto; width: 100%;
+        }
+
+        @media (min-width: 992px) {
+            .dashboard-container {
+                grid-template-columns: 320px 1fr 320px;
+                height: 90vh; align-items: start;
+            }
+            .center-col { grid-row: span 2; }
+            #user-map { height: 100% !important; min-height: 400px; }
+        }
+
+        .glass-panel {
+            background: var(--glass); backdrop-filter: blur(12px);
+            padding: 15px; border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2); position: relative;
+        }
+
+        #user-map {
+            height: 250px; width: 100%; border-radius: 12px;
+            border: 1px solid var(--accent);
+            filter: invert(100%) hue-rotate(180deg) brightness(0.7);
+        }
+
+        .compass-mini {
+            position: absolute; top: 25px; right: 25px;
+            width: 50px; height: 50px; background: rgba(0,0,0,0.6);
+            border-radius: 50%; border: 2px solid var(--accent);
+            display: flex; align-items: center; justify-content: center; z-index: 20;
+        }
+
+        .alt-world {
+            width: 20px; height: 100%; border-radius: 10px;
+            background: linear-gradient(to top, #2d5a27 0%, #87ceeb 30%, #1a2a6c 70%, #000 100%);
+            border: 1px solid rgba(255,255,255,0.3); position: relative;
+        }
+        #trekker-object {
+            position: absolute; left: 50%; bottom: 0%; transform: translate(-50%, 50%);
+            width: 24px; height: 24px; background: var(--danger);
+            border-radius: 50%; box-shadow: 0 0 10px var(--danger);
+            transition: 2s ease; display: flex; align-items: center; justify-content: center;
+        }
+
+        .gauge-row { display: flex; justify-content: space-around; gap: 10px; margin-top: 10px; }
+        .gauge-bar {
+            width: 100%; height: 60px; background: rgba(0,0,0,0.4);
+            border-radius: 8px; position: relative; overflow: hidden;
+        }
+        .fill { position: absolute; bottom: 0; width: 100%; height: 0%; background: var(--accent); transition: 1s; }
+
+        .sos-btn {
+            background: var(--danger); color: white; border: none;
+            width: 100%; padding: 18px; border-radius: 12px;
+            font-size: 1.2rem; font-weight: bold; cursor: pointer;
+        }
+
+        .label { font-size: 0.65rem; text-transform: uppercase; opacity: 0.7; letter-spacing: 1px; }
+        .val { font-size: 1.2rem; font-weight: bold; color: var(--accent); }
+
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #0b0e14; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+            transition: opacity 1s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="splash-screen">
+        <img src="https://cdn-icons-png.flaticon.com/512/854/854878.png" style="width: 100px;">
+        <h1 style="letter-spacing: 5px;">TREKGUARD</h1>
+        <p id="login-status" style="color: var(--accent);">CONNECTING TO HQ...</p>
+    </div>
+
+    <div style="padding: 15px 10px;">
+        <div class="glass-panel" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <img src="https://cdn-icons-png.flaticon.com/512/854/854878.png" style="width: 30px;">
+                <b style="letter-spacing: 2px;">HUD v2.0</b>
+            </div>
+            <div id="sync-status" style="color: var(--success); font-size: 0.8rem;">📡 LINK ENCRYPTED</div>
+        </div>
+    </div>
+
+    <div class="dashboard-container">
+        <div class="glass-panel">
+            <div class="label">Current Altitude</div>
+            <div id="alt-txt" class="val" style="font-size: 2rem;">0m</div>
+            <hr style="border: 0.1px solid rgba(255,255,255,0.1); margin: 15px 0;">
+            <div class="label">Atmospheric Data</div>
+            <div class="gauge-row">
+                <div style="flex:1; text-align:center;">
+                    <div class="gauge-bar"><div id="t-fill" class="fill"></div></div>
+                    <span class="label">TEMP</span><br><b id="t-txt">0°</b>
+                </div>
+                <div style="flex:1; text-align:center;">
+                    <div class="gauge-bar"><div id="p-fill" class="fill" style="background:#a5d6ff;"></div></div>
+                    <span class="label">PRES</span><br><b id="p-txt">0</b>
+                </div>
+                <div style="flex:1; text-align:center;">
+                    <div class="gauge-bar"><div id="g-fill" class="fill" style="background:var(--success);"></div></div>
+                    <span class="label">GAS</span><br><b id="g-txt">0</b>
+                </div>
+            </div>
+        </div>
+
+        <div class="center-col glass-panel" style="display: flex; gap: 10px; padding: 10px;">
+            <div id="user-map" style="flex: 1;"></div>
+            <div class="alt-world"><div id="trekker-object">🚶</div></div>
+            <div class="compass-mini"><div id="mini-dial" style="width:100%; height:100%;">🧭</div></div>
+        </div>
+
+        <div class="glass-panel">
+            <div class="label">GPS Uplink</div>
+            <div id="coord-txt" class="val" style="font-size: 0.9rem; margin-bottom: 15px;">Searching...</div>
+            <div class="label">Sensors History</div>
+            <div style="height: 80px; background: rgba(0,0,0,0.2); border-radius: 8px; margin: 5px 0;"><canvas id="chart1"></canvas></div>
+            <div style="height: 80px; background: rgba(0,0,0,0.2); border-radius: 8px; margin: 5px 0;"><canvas id="chart2"></canvas></div>
+            <button class="sos-btn" style="margin-top: 15px;" onclick="sendSOS()">SOS EMERGENCY</button>
+        </div>
+    </div>
+
+    <div id="hq-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:20000; text-align:center; padding: 20px;">
+        <div class="glass-panel" style="margin-top: 100px;">
+            <h2 style="color:var(--accent);">🛰️ HQ MESSAGE</h2>
+            <div id="hq-message-text" style="font-size: 1.5rem; margin: 20px 0;"></div>
+            <button onclick="acknowledgeCommand()" class="sos-btn" style="background:var(--accent);">ACKNOWLEDGE</button>
+        </div>
+    </div>
+
+<script>
+    var map = L.map('user-map', { zoomControl: false }).setView([12.9716, 77.5946], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    var marker = L.circleMarker([12.9716, 77.5946], { radius: 8, color: '#58a6ff', fillOpacity: 1 }).addTo(map);
+
+    const spark = (col) => ({
+        type: 'line',
+        data: { labels: [], datasets: [{ data: [], borderColor: col, borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: col+'11' }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+    const c1 = new Chart(document.getElementById('chart1'), spark('#ff7b72'));
+    const c2 = new Chart(document.getElementById('chart2'), spark('#58a6ff'));
+
+    window.onload = () => {
+        setTimeout(() => {
+            document.getElementById('splash-screen').style.opacity = '0';
+            setTimeout(() => { document.getElementById('splash-screen').style.display = 'none'; }, 1000);
+        }, 2000);
+    };
+
+  // Inside your user.html <script>
+   async function syncHUD() {
+    try {
+        const res = await fetch('/api/data');
+        const data = await res.json();
+        const s = data.sensors;
+
+        // --- Standard UI Updates ---
+        document.getElementById('t-fill').style.height = ((s.temp + 10) / 60 * 100) + "%";
+        document.getElementById('t-txt').innerText = s.temp + "°";
+        document.getElementById('p-fill').style.height = (s.pres / 1100 * 100) + "%";
+        document.getElementById('p-txt').innerText = Math.round(s.pres);
+        document.getElementById('g-fill').style.height = (s.gas / 1000 * 100) + "%";
+        document.getElementById('g-txt').innerText = s.gas;
+
+        let alt = s.alt;
+        document.getElementById('trekker-object').style.bottom = Math.min((alt / 5000) * 100, 100) + "%";
+        document.getElementById('alt-txt').innerText = Math.round(alt) + "m";
+
+        // --- 🚨 AUTOMATIC TRIGGER POPUP LOGIC ---
+        if (s.status && s.status !== "STABLE") {
+            document.getElementById('hq-message-text').innerText = "⚠️ SYSTEM ALERT: " + s.status;
+            document.getElementById('hq-overlay').style.display = "block";
+            document.body.style.background = "linear-gradient(to top, #900, #000)"; // Warning background
+        } else if (data.hq_command && data.hq_command.trim() !== "") {
+            document.getElementById('hq-message-text').innerText = data.hq_command;
+            document.getElementById('hq-overlay').style.display = "block";
+        } else {
+            document.body.style.background = "linear-gradient(to top, #000, var(--sky-color))";
+        }
+
+        // --- Update Sparklines ---
+        if(data.history && data.history.length > 0) {
+            c1.data.labels = data.history.map(h => list(h.t)); 
+            c1.data.datasets[0].data = data.history.map(h => h.temp); 
+            c1.update('none');
+            c2.data.labels = data.history.map(h => h.t); 
+            c2.data.datasets[0].data = data.history.map(h => h.alt); 
+            c2.update('none');
+        }
+    } catch(e) { console.error("Sync Error:", e); }
+}
+// Sync every 1.5 seconds to catch hardware alerts quickly
+setInterval(syncHUD, 1500);
+        
+
+    
+
+    navigator.geolocation.watchPosition((pos) => {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        document.getElementById('coord-txt').innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        marker.setLatLng([lat, lon]);
+        fetch('/api/update_gps', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({lat: lat, lon: lon})
+        });
+    }, null, { enableHighAccuracy: true });
+
+    // --- 🚨 UPDATED SOS TRIGGER (BLINK FOR 5 SECONDS) ---
+    async function sendSOS() {
+        // 1. Start Blink effect
+        document.body.classList.add('sos-active-blink');
+        document.getElementById('sync-status').innerText = "🚨 SOS BROADCASTING...";
+        document.getElementById('sync-status').style.color = "var(--danger)";
+
+        // 2. Stop Blink after 5 seconds
+        setTimeout(() => {
+            document.body.classList.remove('sos-active-blink');
+            document.getElementById('sync-status').innerText = "📡 HQ NOTIFIED";
+            document.getElementById('sync-status').style.color = "var(--success)";
+        }, 5000);
+
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const emergencyData = { id: "TREKKER_01", lat: pos.coords.latitude, lon: pos.coords.longitude };
+            try {
+                await fetch('/api/sos', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(emergencyData)
+                });
+            } catch(e) { console.error("SOS Failed"); }
+        });
+    }
+
+    async function acknowledgeCommand() {
+        document.getElementById('hq-overlay').style.display = "none";
+        await fetch('/api/send_command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ msg: "", buzz: false })
+        });
+    }
+
+    setInterval(syncHUD, 3000);
+</script>
+</body>
+</html>
